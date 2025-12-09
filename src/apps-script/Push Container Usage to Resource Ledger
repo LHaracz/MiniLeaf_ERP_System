@@ -1,0 +1,54 @@
+function pushContainerUsageToMaster() {
+  const masterSheetId = "1u8pgPkNzo4gPYK4nIEKQXGhT3ZV4pSS0GnQSALF3I1o";
+  const logSheetName = "Resource Usage Log";
+
+  const sourceSS = SpreadsheetApp.getActiveSpreadsheet();
+  const sourceName = sourceSS.getName();
+  const today = new Date();
+  const todayStr = Utilities.formatDate(today, Session.getScriptTimeZone(), "yyyy-MM-dd");
+
+  const containerSheet = sourceSS.getSheetByName("Container Usage");
+  const containerData = containerSheet.getDataRange().getValues();
+
+  const masterSS = SpreadsheetApp.openById(masterSheetId);
+  const logSheet = masterSS.getSheetByName(logSheetName);
+  const existingLog = logSheet.getDataRange().getValues();
+
+  const existingIDs = new Set();
+  existingLog.forEach(row => {
+    const date = Utilities.formatDate(new Date(row[0]), Session.getScriptTimeZone(), "yyyy-MM-dd");
+    const resource = row[1];
+    const source = row[3];
+    if (date && resource && source) {
+      existingIDs.add(`${date}_${resource}_${source}`);
+    }
+  });
+
+  const usageRows = [];
+
+  containerData.forEach(row => {
+    const date = row[0]; // Usage Date
+    const usedContainers = row[2]; // Quantity Used
+    if (date && !isNaN(usedContainers) && usedContainers > 0) {
+      const dateStr = Utilities.formatDate(new Date(date), Session.getScriptTimeZone(), "yyyy-MM-dd");
+      const id = `${dateStr}_Container_${sourceName}`;
+      if (dateStr === todayStr && !existingIDs.has(id)) {
+        usageRows.push([date, "Container", usedContainers, sourceName]);
+      }
+    }
+  });
+
+  if (usageRows.length > 0) {
+    logSheet.getRange(logSheet.getLastRow() + 1, 1, usageRows.length, 4).setValues(usageRows);
+    Logger.log(`✅ ${usageRows.length} container usage row(s) pushed to master log.`);
+  } else {
+    Logger.log("No new container usage to push today.");
+  }
+}
+function onOpen() {
+  const ui = SpreadsheetApp.getUi();
+  ui.createMenu("MiniLeaf Tools")
+    .addItem("Push Container Usage Forecast", "pushContainerUsageToMaster")
+    .addItem("Push Seed & Soil Forecast", "pushSeedAndSoilForecastToMaster")
+    .addToUi();
+}
