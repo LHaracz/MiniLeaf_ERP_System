@@ -1,0 +1,37 @@
+function updateEstimatedYields() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const yieldSummaryFile = DriveApp.getFilesByName("Harvests Yield Summary").next();
+  const yieldSummarySS = SpreadsheetApp.open(yieldSummaryFile);
+  const yieldSheet = yieldSummarySS.getSheetByName("Yield Summary");
+  const productionSheet = ss.getActiveSheet();
+
+  const yieldData = yieldSheet.getDataRange().getValues();
+  const prodData = productionSheet.getDataRange().getValues();
+
+  const yieldHeader = yieldData[0];
+  const prodHeader = prodData[0];
+
+  const microgreenIndexYield = yieldHeader.indexOf("Microgreen");
+  const avgYieldIndex = yieldHeader.indexOf("Avg Yield");
+
+  const microgreenIndexProd = prodHeader.indexOf("Microgreen");
+  const estYieldIndexProd = prodHeader.indexOf("Estimated Yield");
+
+  const avgYieldMap = {};
+  for (let i = 1; i < yieldData.length; i++) {
+    const name = yieldData[i][microgreenIndexYield];
+    let avg = yieldData[i][avgYieldIndex];
+    if (typeof avg === "string" && avg.includes("#DIV/0")) continue;
+    avgYieldMap[name.toLowerCase()] = parseFloat(avg);
+  }
+
+  for (let j = 1; j < prodData.length; j++) {
+    const mg = prodData[j][microgreenIndexProd];
+    const avgYield = avgYieldMap[mg.toLowerCase()];
+    if (!isNaN(avgYield)) {
+      productionSheet.getRange(j + 1, estYieldIndexProd + 1).setValue(avgYield);
+    }
+  }
+
+  SpreadsheetApp.getUi().alert("Estimated yields updated from Harvests Yield Summary.");
+}
