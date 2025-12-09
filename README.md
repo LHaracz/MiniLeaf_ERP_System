@@ -1,11 +1,6 @@
 # MiniLeaf_ERP_System
 Automated production scheduling, inventory forecasting, and order integration system for a microgreens farm using Google Sheets, Google Apps Script, Google Calendar, and Shopify (via Pickeasy).
 
-# MiniLeaf Production & Inventory Automation
-
-This repo contains the Google Sheets + Apps Script system I built to run **MiniLeaf**, a microgreens farm.  
-It automates production scheduling, inventory forecasting, and order intake from my Shopify store (via Pickeasy + Google Calendar).
-
 ---
 
 ## Tech Stack
