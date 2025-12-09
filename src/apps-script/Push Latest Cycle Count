@@ -1,0 +1,46 @@
+function pushLatestCycleCountsToLedger() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const formSheet = ss.getSheetByName("Cycle Count (Responses)");
+  const ledgerSheet = ss.getSheetByName("Resource Ledger");
+
+  const formData = formSheet.getDataRange().getValues();
+  const headerRow = formData[0];
+  const lastRow = formData[formData.length - 1]; // Latest form response
+
+  const ledgerData = ledgerSheet.getDataRange().getValues();
+  const resourceCol = ledgerData[0].indexOf("Resource");
+  const qtyCol = ledgerData[0].indexOf("Starting Quantity");
+
+  // Validate column positions
+  Logger.log(`resourceCol: ${resourceCol}, qtyCol: ${qtyCol}`);
+  if (resourceCol < 0 || qtyCol < 0) {
+    throw new Error("Missing required columns. Please ensure 'Resource' and 'Starting Quantity' exist in the header row.");
+  }
+
+  let updateCount = 0;
+
+  for (let col = 1; col < headerRow.length; col++) {
+    const resourceName = headerRow[col];
+    const countedQty = lastRow[col];
+
+    if (!resourceName || countedQty === "" || isNaN(countedQty)) continue;
+
+    for (let i = 1; i < ledgerData.length; i++) {
+      if (ledgerData[i][resourceCol] === resourceName) {
+        ledgerSheet.getRange(i + 1, qtyCol + 1).setValue(countedQty);
+        updateCount++;
+        break;
+      }
+    }
+  }
+
+  Logger.log(`Updated ${updateCount} resources from the latest cycle count.`);
+}
+function onOpen() {
+  const ui = SpreadsheetApp.getUi();
+  ui.createMenu("MiniLeaf Tools")
+    .addItem("Update Resource Ledger/Send ReOrder Alerts", "updateResourceLedgerAndSendAlerts")
+    .addItem("Push Latest Cycle Count", "pushLatestCycleCountsToLedger")
+    .addToUi();
+}
+
