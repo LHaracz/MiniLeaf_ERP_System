@@ -190,27 +190,6 @@ All email addresses are configured at the top of the relevant scripts and should
 
 ---
 
-## How to Use / Set Up (High Level)
-
-1. **Copy the sheet templates** from `/sheets-templates` into your own Google Drive.
-2. **Paste the Apps Script files** in `/src/apps-script` into:
-   - The production schedule spreadsheet
-   - The resource ledger/master resource usage sheet
-3. Update configuration constants:
-   - Calendar name / ID
-   - Master sheet IDs
-   - Alert email recipients
-4. Set up any required **time-based triggers**:
-   - Daily production alerts
-   - Daily or weekly resource ledger updates
-   - Order sync from calendar → `One-Time Orders`
-5. Connect **Shopify → Pickeasy → Google Calendar** so that new orders appear as calendar events.
-
-> Note: This repo is primarily meant as a **portfolio / reference implementation**, not a turnkey product.  
-> Some IDs, ranges, and sheet names are specific to my MiniLeaf setup and will need to be adjusted if you reuse this system.
-
----
-
 ## About MiniLeaf
 
 MiniLeaf is the microgreens business I co-founded.  
