@@ -21,7 +21,6 @@ Production Schedule
 Seed / Soil / Container Usage
 ↓
 Resource Usage Log
-↓
 Resource Ledger & Alerts
 
 ---
