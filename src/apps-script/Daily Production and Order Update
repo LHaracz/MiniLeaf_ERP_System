@@ -1,0 +1,307 @@
+function sendProductionAlerts() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Production Summary");
+  const data = sheet.getDataRange().getValues();
+
+  // Normalize "today" to midnight
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const sowToday = [];
+  const soakToday = [];      // soak happens on startDate for soak-required crops
+  const drainToday = [];     // drain happens startDate + 1 (sow day for soak crops)
+  const lightToday = [];
+  const harvestToday = [];
+  const weighSeeds = [];     // weigh seeds today for TOMORROW's sowings
+
+  const soakingRequired = [
+    "beet", "cantaloupe", "cilantro", "pea",
+    "popcorn", "radish", "sunflower", "wheatgrass"
+  ];
+
+  const harvestCell = sheet.getRange("H1").getValue();
+  const harvestDate = new Date(harvestCell);
+  harvestDate.setHours(0, 0, 0, 0);
+
+  const sowRateMap = getSowRates_();
+
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+
+  for (let i = 1; i < data.length; i++) {
+    const microgreen = data[i][0];
+    if (!microgreen) continue;
+
+    const name = microgreen.toLowerCase().trim();
+    const traysToSow = Number(data[i][1]);
+    const startDateRaw = data[i][4];
+    const start = new Date(startDateRaw);
+    if (!traysToSow || isNaN(start)) continue;
+    start.setHours(0, 0, 0, 0);
+
+    // Germination (from the actual SOW date)
+    let germinationDays;
+    switch (name) {
+      case "arugula":
+      case "amaranth":
+      case "buckwheat":
+      case "broccoli":
+      case "cabbage":
+      case "kale":
+      case "mustard":
+      case "radish":
+      case "wheatgrass":
+        germinationDays = 4; break;
+      case "sunflower":
+        germinationDays = 5; break;
+      case "beet":
+      case "pea":
+      case "popcorn":
+        germinationDays = 6; break;
+      case "cantaloupe":
+      case "cilantro":
+      case "strawberry":
+        germinationDays = 8; break;
+      case "basil":
+        germinationDays = 11;
+      default:
+        germinationDays = 4;
+    }
+
+    // Determine milestone dates correctly per crop type
+    let sowDate, lightDate;
+
+    if (soakingRequired.includes(name)) {
+      const soakDate = start;              // soak ON startDate
+      const drainDate = addDays(start, 1); // drain (and sow) the NEXT day
+      sowDate = drainDate;                 // sow after draining
+      lightDate = addDays(sowDate, germinationDays);
+
+      if (+soakDate === +today) {
+        soakToday.push(`${microgreen} (${traysToSow} trays)`);
+      }
+      if (+drainDate === +today) {
+        drainToday.push(`${microgreen} (${traysToSow} trays)`);
+        // You said sow happens the same day as drain:
+        sowToday.push(`${microgreen} (${traysToSow} trays)`);
+      }
+    } else {
+      sowDate = start;                     // non-soak crops sow ON startDate
+      lightDate = addDays(sowDate, germinationDays);
+    }
+
+    // Non-soak crops: sow IF today is their sow day
+    if (!soakingRequired.includes(name) && +sowDate === +today) {
+      sowToday.push(`${microgreen} (${traysToSow} trays)`);
+    }
+
+    // Light move from SOW date + germination
+    if (+lightDate === +today) {
+      lightToday.push(`${microgreen} (${traysToSow} trays)`);
+    }
+
+    if (!isNaN(harvestDate) && harvestDate.getTime() === today.getTime()) {
+      harvestToday.push(`${microgreen} (${traysToSow} trays)`);
+    }
+
+    // Weigh seeds TODAY for TOMORROW's SOWING (based on actual sowDate)
+    const isSoakCrop = soakingRequired.includes(name);
+if (
+  (!isSoakCrop && +sowDate === +tomorrow) ||   // non-soak: sow tomorrow
+  (isSoakCrop && +start === +tomorrow)         // soak crops: soak (start) tomorrow
+) {
+  const rate = sowRateMap[name];
+  if (typeof rate === 'number' && !isNaN(rate)) {
+    const grams = Math.round(traysToSow * rate * 10) / 10;
+    // optional note to clarify why you're weighing
+    const note = isSoakCrop ? " (soak tomorrow)" : " (sow tomorrow)";
+    weighSeeds.push(`${microgreen}: ${grams} g (for ${traysToSow} trays @ ${rate} g/tray)${note}`);
+  } else {
+    weighSeeds.push(`${microgreen}: sow rate not found (for ${traysToSow} trays)`);
+  }
+}
+  }
+
+  // Only skip if there is truly nothing to report
+  if (
+    sowToday.length === 0 &&
+    soakToday.length === 0 &&
+    drainToday.length === 0 &&
+    lightToday.length === 0 &&
+    harvestToday.length === 0 &&
+    weighSeeds.length === 0
+  ) return;
+
+  const tz = Session.getScriptTimeZone();
+  const dateStamp = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+  const subject = `MiniLeaf Production – ${dateStamp}`;
+  const email = "minileafde@gmail.com, morrowethan12@gmail.com";
+
+  let message = "Here’s your MiniLeaf production reminder for today\n\n";
+
+  if (soakToday.length) {
+    message += "Soak These Seeds Today:\n" + soakToday.join("\n") + "\n\n";
+  }
+  if (drainToday.length) {
+    message += "Drain These Soaked Seeds Today:\n" + drainToday.join("\n") + "\n\n";
+  }
+  if (sowToday.length) {
+    message += "Sow These Trays Today:\n" + sowToday.join("\n") + "\n\n";
+  }
+  if (lightToday.length) {
+    message += "Move These Trays to Light Today:\n" + lightToday.join("\n") + "\n\n";
+  }
+  if (harvestToday.length) {
+    message += "Harvest These Trays Today:\n" + harvestToday.join("\n") + "\n\n";
+  }
+  if (weighSeeds.length) {
+    const tomorrowStamp = Utilities.formatDate(tomorrow, tz, 'yyyy-MM-dd');
+    message += `Prep for Tomorrow (${tomorrowStamp}) – Weigh Seeds:\n` + weighSeeds.join("\n") + "\n\n";
+  }
+  if (!isNaN(harvestDate) && harvestDate.getTime() === today.getTime()) {
+    const ordersSection = buildWeeklyOrdersSection_();
+    if (ordersSection) message += ordersSection;
+  }
+
+  MailApp.sendEmail(email, subject, message);
+ sendTrayPrepForecast_(data);
+}
+
+function sendTrayPrepForecast_(data) {
+  // Only notify for trays whose start date is today, +1 day, or +2 days.
+  // Counts per tray: 2 no-hole + 1 hole.
+  const tz = Session.getScriptTimeZone();
+  const email = "minileafde@gmail.com, morrowethan12@gmail.com";
+  const today = new Date(); today.setHours(0,0,0,0);
+  const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+  // key: 'yyyy-MM-dd' -> { trays, noHole, hole, dateObj }
+  const counts = {};
+
+  for (let i = 1; i < data.length; i++) {
+    const trays = Number(data[i][1]);     // your trays column
+    const startRaw = data[i][4];          // your start date column
+    if (!trays || !startRaw) continue;
+
+    const d = new Date(startRaw);
+    if (isNaN(d)) continue;
+    d.setHours(0,0,0,0);
+
+    const daysAhead = Math.round((d - today) / MS_PER_DAY);
+    if (daysAhead < 0 || daysAhead > 2) continue; // keep ONLY today, +1, +2
+
+    const key = Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+    if (!counts[key]) counts[key] = { trays: 0, noHole: 0, hole: 0, dateObj: new Date(d) };
+    counts[key].trays += trays;
+    counts[key].noHole += 2 * trays; // 2 no-hole per tray
+    counts[key].hole   += 1 * trays; // 1 hole per tray
+  }
+
+  const keys = Object.keys(counts).sort(); // chronological
+  if (keys.length === 0) return; // nothing in the 0–2 day window → no email
+
+  let totalTrays = 0, totalNoHole = 0, totalHole = 0;
+  const lines = [];
+
+  for (const k of keys) {
+    const c = counts[k];
+    const dow = Utilities.formatDate(c.dateObj, tz, 'EEE'); // Mon/Tue/...
+    lines.push(`${dow} ${k} — ${c.trays} trays (${c.noHole} no-hole, ${c.hole} hole)`);
+    totalTrays += c.trays;
+    totalNoHole += c.noHole;
+    totalHole += c.hole;
+  }
+
+  const windowLabel = keys.length === 1
+    ? keys[0]
+    : `${keys[0]} → ${keys[keys.length - 1]}`;
+
+  const subject = `Tray Prep (0–2 day window) – ${Utilities.formatDate(today, tz, 'yyyy-MM-dd')} • ${windowLabel}`;
+
+  let msg = "Heads up! These trays start within the next 0–2 days. Prep counts below:\n\n";
+  msg += lines.join("\n") + "\n\n";
+  msg += `TOTAL (0–2 day window): ${totalTrays} trays (${totalNoHole} no-hole, ${totalHole} hole)\n`;
+
+  MailApp.sendEmail(email, subject, msg);
+}
+
+function getSowRates_() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Info Master");
+  if (!sh) return {};
+  const values = sh.getDataRange().getValues();
+  if (!values || values.length === 0) return {};
+
+  const headers = values[0].map(h => String(h).trim().toLowerCase());
+  const nameIdx = headers.indexOf("microgreen");
+  const rateIdx = headers.indexOf("sow rate(g)");
+  if (nameIdx === -1 || rateIdx === -1) return {};
+
+  const map = {};
+  for (let r = 1; r < values.length; r++) {
+    const name = values[r][nameIdx];
+    const rate = Number(values[r][rateIdx]);
+    if (!name || isNaN(rate)) continue;
+    map[String(name).toLowerCase().trim()] = rate;
+  }
+  return map;
+}
+
+function buildWeeklyOrdersSection_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('One-Time Orders');
+  if (!sheet) return ''; // sheet missing → skip section
+
+  const values = sheet.getDataRange().getValues();
+  if (!values || values.length < 2) return ''; // no rows
+
+  // Header (row 1)
+  const header = values[0].map(h => String(h || '').trim());
+  const idx = (name) => header.indexOf(name);
+
+  // Required columns (by name from your earlier setup)
+  const iCustomer  = idx('Customer Name');
+  const iOrder     = idx('Order Number');
+  const iType      = idx('Microgreen Type');
+  const iQtyOz     = idx('Quantity (oz)');
+  const iMethod    = idx('Delivery Method');
+  const iDOW       = idx('Fulfillment DOW');
+  const iTime      = idx('Fulfillment Time');
+
+  // If columns aren’t found, bail gracefully
+  const needed = [iType, iQtyOz, iMethod, iDOW, iTime];
+  if (needed.some(i => i < 0)) return '';
+
+  const lines = [];
+  for (let r = 1; r < values.length; r++) {
+    const row = values[r];
+    const type   = (row[iType]   || '').toString().trim();
+    const qtyOz  = Number(row[iQtyOz]) || '';
+    const method = (row[iMethod] || '').toString().trim();
+    const dow    = (row[iDOW]    || '').toString().trim();
+    const time   = (row[iTime]   || '').toString().trim();
+
+    if (!type) continue; // skip blank lines
+
+    const orderNum = iOrder >= 0 ? (row[iOrder] || '').toString().trim() : '';
+    const customer = iCustomer >= 0 ? (row[iCustomer] || '').toString().trim() : '';
+
+    let suffix = '';
+    if (orderNum || customer) {
+      // include both if present
+      if (orderNum && customer) suffix = ` (Order #${orderNum} • ${customer})`;
+      else if (orderNum)        suffix = ` (Order #${orderNum})`;
+      else if (customer)        suffix = ` (${customer})`;
+    }
+
+    const qtyTxt = qtyOz !== '' ? `${qtyOz} oz` : '';
+    const timeTxt = time || 'All day';
+    const methodTxt = method || '';
+
+    lines.push(`${dow} ${timeTxt} — ${methodTxt} — ${type}${qtyTxt ? ' — ' + qtyTxt : ''}${suffix}`);
+  }
+
+  if (!lines.length) return '';
+  return "🧾 Orders Due This Week:\n" + lines.join("\n") + "\n\n";
+}
