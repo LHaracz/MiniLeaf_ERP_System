@@ -40,7 +40,7 @@ function pushContainerUsageToMaster() {
 
   if (usageRows.length > 0) {
     logSheet.getRange(logSheet.getLastRow() + 1, 1, usageRows.length, 4).setValues(usageRows);
-    Logger.log(`✅ ${usageRows.length} container usage row(s) pushed to master log.`);
+    Logger.log(`${usageRows.length} container usage row(s) pushed to master log.`);
   } else {
     Logger.log("No new container usage to push today.");
   }
