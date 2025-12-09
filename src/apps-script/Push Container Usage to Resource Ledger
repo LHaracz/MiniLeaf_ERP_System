@@ -1,5 +1,5 @@
 function pushContainerUsageToMaster() {
-  const masterSheetId = "1u8pgPkNzo4gPYK4nIEKQXGhT3ZV4pSS0GnQSALF3I1o";
+  const masterSheetId = // Add Sheet ID here
   const logSheetName = "Resource Usage Log";
 
   const sourceSS = SpreadsheetApp.getActiveSpreadsheet();
