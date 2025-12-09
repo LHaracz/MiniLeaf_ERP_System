@@ -1,0 +1,71 @@
+function pushSeedAndSoilForecastToMaster() {
+  const masterSheetId = ""; // Put Sheet ID Here
+  const logSheetName = "Resource Usage Log";
+
+  const sourceSS = SpreadsheetApp.getActiveSpreadsheet();
+  const sourceName = sourceSS.getName();
+
+  const seedSheet = sourceSS.getSheetByName("Seed Usage");
+  const soilSheet = sourceSS.getSheetByName("Soil Usage");
+
+  const masterSS = SpreadsheetApp.openById(masterSheetId);
+  const logSheet = masterSS.getSheetByName(logSheetName);
+  const existingLog = logSheet.getDataRange().getValues();
+
+  const existingIDs = new Set();
+  existingLog.forEach(row => {
+    const date = formatDateKey(row[0]);
+    const resource = row[1];
+    const source = row[3];
+    if (date && resource && source) {
+      existingIDs.add(`${date}_${resource}_${source}`);
+    }
+  });
+
+  const newEntries = [];
+
+  const seedData = seedSheet.getDataRange().getValues();
+  seedData.forEach(row => {
+    const microgreen = row[0]; // Microgreen
+    const totalUsedGrams = row[1]; // Total Used (g)
+    const date = row[2]; // Sowing Date
+    if (date && microgreen && !isNaN(totalUsedGrams) && totalUsedGrams > 0) {
+      const usedLbs = totalUsedGrams / 453.592;
+      const key = `${formatDateKey(date)}_${microgreen}_${sourceName}`;
+      if (!existingIDs.has(key)) {
+        newEntries.push([date, microgreen, usedLbs, sourceName]);
+      }
+    }
+  });
+
+  const soilData = soilSheet.getDataRange().getValues();
+  soilData.forEach(row => {
+    const date = row[0]; // Sowing Date
+    const totalUsedIn3 = row[4]; // Total Soil Used (cu in)
+    if (date && !isNaN(totalUsedIn3) && totalUsedIn3 > 0) {
+      const usedCuFt = totalUsedIn3 / 1728;
+      const key = `${formatDateKey(date)}_Soil_${sourceName}`;
+      if (!existingIDs.has(key)) {
+        newEntries.push([date, "Soil", usedCuFt, sourceName]);
+      }
+    }
+  });
+
+  if (newEntries.length > 0) {
+    logSheet.getRange(logSheet.getLastRow() + 1, 1, newEntries.length, 4).setValues(newEntries);
+    Logger.log(`${newEntries.length} forecasted rows pushed to master log.`);
+  } else {
+    Logger.log("No new seed or soil entries to log.");
+  }
+}
+
+function formatDateKey(dateObj) {
+  return Utilities.formatDate(new Date(dateObj), Session.getScriptTimeZone(), "yyyy-MM-dd");
+}
+function onOpen() {
+  const ui = SpreadsheetApp.getUi();
+  ui.createMenu("MiniLeaf Tools")
+    .addItem("Push Container Usage Forecast", "pushContainerUsageToMaster")
+    .addItem("Push Seed & Soil Forecast", "pushSeedAndSoilForecastToMaster")
+    .addToUi();
+}
