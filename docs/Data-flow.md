@@ -7,20 +7,21 @@ This document explains how data moves through the MiniLeaf system, from customer
 ## High-Level Flow
 
 Shopify
-↓
+→
 Pickeasy App
-↓
+→
 Google Calendar
-↓
+→
 Calendar Order Sync Script
-↓
+→
 One-Time Orders Sheet
-↓
+→
 Production Schedule
-↓
+→
 Seed / Soil / Container Usage
-↓
+→
 Resource Usage Log
+→
 Resource Ledger & Alerts
 
 ---
