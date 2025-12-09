@@ -8,7 +8,7 @@ It automates production scheduling, inventory forecasting, and order intake from
 
 ---
 
-## 🔧 Tech Stack
+## Tech Stack
 
 - **Google Sheets** – data model + UI for production planning and inventory
 - **Google Apps Script** – automation, email alerts, integrations
@@ -17,7 +17,7 @@ It automates production scheduling, inventory forecasting, and order intake from
 
 ---
 
-## 🧩 Main Components
+## Main Components
 
 ### 1. Production Schedule
 
@@ -178,7 +178,7 @@ This turns messy calendar events into a neat **order table** that the production
 
 ---
 
-## 📬 Email Alerts & Automations
+## Email Alerts & Automations
 
 The system currently sends:
 
@@ -195,7 +195,7 @@ All email addresses are configured at the top of the relevant scripts and should
 
 ---
 
-## 🚀 How to Use / Set Up (High Level)
+## How to Use / Set Up (High Level)
 
 1. **Copy the sheet templates** from `/sheets-templates` into your own Google Drive.
 2. **Paste the Apps Script files** in `/src/apps-script` into:
@@ -216,7 +216,7 @@ All email addresses are configured at the top of the relevant scripts and should
 
 ---
 
-## 📌 About MiniLeaf
+## About MiniLeaf
 
 MiniLeaf is the microgreens business I co-founded.  
 This system replaced manual planning with an automated workflow that:
