@@ -1,0 +1,83 @@
+function updateResourceLedgerAndSendAlerts() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ledger = ss.getSheetByName("Resource Ledger");
+  const usageLog = ss.getSheetByName("Resource Usage Log");
+  const email = "minileafde@gmail.com";
+
+  const ledgerData = ledger.getDataRange().getValues();
+  const usageData = usageLog.getDataRange().getValues();
+
+  const headers = ledgerData[0];
+  const resourceIndex = headers.indexOf("Resource");
+  const startingQtyIndex = headers.indexOf("Starting Quantity");
+  const usedSoFarIndex = headers.indexOf("Used So Far");
+  const thresholdIndex = headers.indexOf("Reorder Threshold");
+  const reorderDateIndex = headers.indexOf("Predicted Reorder Date");
+  const alertSentIndex = headers.indexOf("Alert Sent");
+
+  const alerts = [];
+
+  // Group usage by resource, sorted by date
+  const usageByResource = {};
+  usageData.forEach(row => {
+    const [date, resource, amount] = row;
+    if (!usageByResource[resource]) usageByResource[resource] = [];
+    usageByResource[resource].push({ date: new Date(date), amount });
+  });
+
+  // Sort each resource group by date
+  for (const res in usageByResource) {
+    usageByResource[res].sort((a, b) => a.date - b.date);
+  }
+
+  // Process each ledger row
+  for (let i = 1; i < ledgerData.length; i++) {
+    const row = ledgerData[i];
+    const resource = row[resourceIndex];
+    const startingQty = row[startingQtyIndex];
+    const threshold = row[thresholdIndex];
+    const alertAlreadySent = row[alertSentIndex];
+
+    const usageEntries = usageByResource[resource] || [];
+    let totalUsed = 0;
+    let runningRemaining = startingQty;
+    let predictedReorderDate = "";
+
+    for (const entry of usageEntries) {
+      totalUsed += entry.amount;
+      runningRemaining -= entry.amount;
+      if (runningRemaining <= threshold && predictedReorderDate === "") {
+        predictedReorderDate = Utilities.formatDate(entry.date, Session.getScriptTimeZone(), "yyyy-MM-dd");
+      }
+    }
+
+    const currentRemaining = startingQty - totalUsed;
+
+    // Update ledger
+    ledger.getRange(i + 1, usedSoFarIndex + 1).setValue(totalUsed);
+    ledger.getRange(i + 1, reorderDateIndex + 1).setValue(predictedReorderDate);
+
+    // Send alert if below threshold
+    if (currentRemaining <= threshold && alertAlreadySent !== true) {
+      alerts.push(`${resource}: Remaining ${currentRemaining.toFixed(2)}, reorder by ${predictedReorderDate}`);
+      ledger.getRange(i + 1, alertSentIndex + 1).setValue(true);
+    }
+  }
+
+  // Email alert summary
+  if (alerts.length > 0) {
+    MailApp.sendEmail({
+      to: email,
+      subject: "MiniLeaf Resource Alert",
+      body: "The following resources are below threshold:\n\n" + alerts.join("\n")
+    });
+  }
+}
+
+function onOpen() {
+  const ui = SpreadsheetApp.getUi();
+  ui.createMenu("MiniLeaf Tools")
+    .addItem("Update Resource Ledger/Send ReOrder Alerts", "updateResourceLedgerAndSendAlerts")
+    .addItem("Push Latest Cycle Count", "pushLatestCycleCountsToLedger")
+    .addToUi();
+}
