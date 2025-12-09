@@ -303,5 +303,5 @@ function buildWeeklyOrdersSection_() {
   }
 
   if (!lines.length) return '';
-  return "🧾 Orders Due This Week:\n" + lines.join("\n") + "\n\n";
+  return "Orders Due This Week:\n" + lines.join("\n") + "\n\n";
 }
