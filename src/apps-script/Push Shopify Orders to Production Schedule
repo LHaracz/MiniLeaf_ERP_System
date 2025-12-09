@@ -1,0 +1,282 @@
+const CONFIG = {
+CALENDAR_NAME: 'minileafde@gmail.com',   // Calendar receiving orders from Pickeasy
+ORDERS_SHEET_NAME: 'One-Time Orders',    // Destination tab
+HARVEST_SHEET_NAME: 'Production Summary',// Where H1 contains the harvest date
+HARVEST_CELL: 'H1',                      // Cell with harvest date
+DAY_OFFSETS_AFTER_HARVEST: [1, 2, 3, 4, 5], // Thu–Sun offsets if harvest is Wed
+PICKUP_KEYWORD: 'pickup',
+DELIVERY_KEYWORD: 'delivery'
+};
+const CANONICAL_PRODUCTS = [
+'Arugula','Amaranth','Basil','Beet','Broccoli','Cabbage','Cantaloupe','Cilantro',
+'Kale','Mustard','Pea','Popcorn','Radish','Strawberry','Sunflower','Wheatgrass'
+];
+
+function syncCalendarOrders() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Harvest date from Production Summary!H1
+  const harvestSheet = ss.getSheetByName(CONFIG.HARVEST_SHEET_NAME);
+  if (!harvestSheet) throw new Error(`Sheet "${CONFIG.HARVEST_SHEET_NAME}" not found.`);
+  const harvestDate = normalizeDate(harvestSheet.getRange(CONFIG.HARVEST_CELL).getValue());
+  if (isNaN(harvestDate.getTime())) {
+    throw new Error(`Harvest date in ${CONFIG.HARVEST_SHEET_NAME}!${CONFIG.HARVEST_CELL} is empty or invalid.`);
+  }
+
+  const ordersSheet = ss.getSheetByName(CONFIG.ORDERS_SHEET_NAME);
+  if (!ordersSheet) throw new Error(`Sheet "${CONFIG.ORDERS_SHEET_NAME}" not found.`);
+
+  // Day windows after harvest
+  const windows = CONFIG.DAY_OFFSETS_AFTER_HARVEST.map(offset => {
+    const day = addDays(harvestDate, offset);
+    return { start: startOfDay(day), end: addDays(startOfDay(day), 1) };
+  });
+
+  // Calendar
+  const cal = CalendarApp.getCalendarsByName(CONFIG.CALENDAR_NAME)[0];
+  if (!cal) throw new Error(`Calendar "${CONFIG.CALENDAR_NAME}" not found.`);
+
+  // Collect events in windows
+  let events = [];
+  windows.forEach(w => { events = events.concat(cal.getEvents(w.start, w.end)); });
+
+  // Prepare rows (skip col E)
+  const rowsAD = [];     // A-D: Customer, Order, Microgreen, Quantity (oz)
+  const rowsFGHI = [];   // F-I: Potential Rev (blank), Delivery Method, Fulfillment DOW, Fulfillment Time
+
+  const tz = Session.getScriptTimeZone();
+
+  events.forEach(ev => {
+    const title = (ev.getTitle() || '').trim();
+    const descRaw = ev.getDescription() || '';
+    const desc = sanitizeDescription(descRaw);
+
+    const orderNumber    = extractOrderNumber(title, desc);
+    const customerName   = extractCustomerName(desc);
+    const deliveryMethod = inferDeliveryMethod(title);
+
+    // Fulfillment DOW/Time from event start/end
+    const dow = Utilities.formatDate(ev.getStartTime(), tz, 'EEEE'); // e.g., "Thursday"
+    const timeRange = ev.isAllDayEvent()
+      ? 'All day'
+      : `${Utilities.formatDate(ev.getStartTime(), tz, 'h:mm a')} – ${Utilities.formatDate(ev.getEndTime(), tz, 'h:mm a')}`;
+
+    const productLines = extractProductLines(desc); // strings like "2 x 6 oz Radish Rambo"
+
+    // If no parsed product lines, still write a single row with timing + method
+    if (productLines.length === 0) {
+      rowsAD.push([customerName, orderNumber, '', '']);
+      rowsFGHI.push(['', deliveryMethod, dow, timeRange]);
+      return;
+    }
+
+    productLines.forEach(line => {
+      const { count, nameRaw, qtyOz } = parseProductLine(line);
+      const nameCanonical = canonicalizeName(nameRaw);
+      const qtyVal = qtyOz ? Number(qtyOz) : ''; // raw number or blank
+
+      // REPLICATE rows by count
+      const n = Math.max(1, count || 1);
+      for (let i = 0; i < n; i++) {
+        rowsAD.push([customerName, orderNumber, nameCanonical, qtyVal]);
+        rowsFGHI.push(['', deliveryMethod, dow, timeRange]);
+      }
+    });
+  });
+
+  // Headers (now A:I)
+  const header = [
+    'Customer Name',
+    'Order Number',
+    'Microgreen Type',
+    'Quantity (oz)',
+    'Num Containers',
+    'Potental Rev',
+    'Delivery Method',
+    'Fulfillment DOW',
+    'Fulfillment Time'
+  ];
+  ensureHeader(ordersSheet, header);
+
+  // Clear body except col E
+  clearBodyExceptColumnE(ordersSheet, header.length);
+
+  if (rowsAD.length === 0) return;
+
+  // Write A-D
+  ordersSheet.getRange(2, 1, rowsAD.length, 4).setValues(rowsAD);
+  // Write F-I (skipping E)
+  ordersSheet.getRange(2, 6, rowsFGHI.length, 4).setValues(rowsFGHI);
+
+  ordersSheet.autoResizeColumns(1, header.length);
+}
+
+function extractOrderNumber(title, desc) {
+  let m = /Order\s*Number:\s*#?(\d+)/i.exec(desc);
+  if (m) return m[1];
+  m = /#(\d+)/.exec(title);
+  return m ? m[1] : '';
+}
+
+function extractCustomerName(desc) {
+  const m = /Customer\s*Name:\s*([^\n\r]+)/i.exec(desc);
+  return m ? m[1].trim() : '';
+}
+
+function inferDeliveryMethod(title) {
+  const t = title.toLowerCase();
+  if (t.includes(CONFIG.PICKUP_KEYWORD.toLowerCase()))   return 'Pickup';
+  if (t.includes(CONFIG.DELIVERY_KEYWORD.toLowerCase())) return 'Delivery';
+  return '';
+}
+
+function extractProductLines(desc) {
+  const lines = desc.split(/\r?\n/);
+  const out = [];
+  let inProducts = false;
+  for (let i = 0; i < lines.length; i++) {
+    const L = lines[i].trim();
+    if (/^Products:\s*$/i.test(L)) { inProducts = true; continue; }
+    if (inProducts) {
+      if (!L) break;
+      if (/^[•\-\*]\s*/.test(L) || /^\d/.test(L)) {
+        out.push(L.replace(/^[•\-\*]\s*/, '').trim());
+      } else {
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Parses a product line like:
+ *   "2 X 6 oz Radish Rambo"
+ *   "1x 4oz Sunflower"
+ *   "3 × Pea Shoots"
+ * Returns:
+ *   { count, nameRaw, qtyOz }
+ */
+function parseProductLine(line) {
+  let s = line.trim();
+
+  // Leading count (replication)
+  // Matches: "2 X ", "2x ", "3× ", "2 " (count only)
+  let count = 1;
+  const countRe = /^\s*(\d+)\s*(?:[xX×]\b)?\s*/;
+  const mCount = countRe.exec(s);
+  if (mCount) {
+    count = parseInt(mCount[1], 10);
+    s = s.slice(mCount[0].length).trim();
+  }
+
+  // Ounces (optional): "6 oz", "6oz", "6-oz"
+  let qtyOz = '';
+  const ozRe = /(\d+)\s*[-]?\s*oz\b/i;
+  const mOz = ozRe.exec(s);
+  if (mOz) {
+    qtyOz = mOz[1];
+    s = s.replace(mOz[0], '').replace(/\s{2,}/g, ' ').trim();
+  }
+
+  const nameRaw = s; // remaining string is the raw product name
+  return { count, nameRaw, qtyOz };
+}
+
+/**
+ * Maps raw product names to the canonical schedule names using substring contains.
+ * Example: "Radish Rambo" -> "Radish", "Pea Shoots" -> "Pea"
+ */
+function canonicalizeName(nameRaw) {
+  const low = (nameRaw || '').toLowerCase();
+
+  for (const canon of CANONICAL_PRODUCTS) {
+    const key = canon.toLowerCase();
+    if (low.includes(key)) return canon; // exact keyword hit
+  }
+
+  // Common alternates
+  if (/\bpea\b|\bshoots?\b/i.test(nameRaw)) return 'Pea';
+  if (/rambo/i.test(nameRaw)) return 'Radish';
+  if (/sun\s*flower/i.test(nameRaw)) return 'Sunflower';
+  if (/broc/i.test(nameRaw)) return 'Broccoli';
+  if (/cabbage/i.test(nameRaw)) return 'Cabbage';
+  if (/kale/i.test(nameRaw)) return 'Kale';
+  if (/cilantro/i.test(nameRaw)) return 'Cilantro';
+  if (/mustard/i.test(nameRaw)) return 'Mustard';
+  if (/beet/i.test(nameRaw)) return 'Beet';
+  if (/basil/i.test(nameRaw)) return 'Basil';
+  if (/amaranth/i.test(nameRaw)) return 'Amaranth';
+  if (/arug/i.test(nameRaw)) return 'Arugula';
+  if (/wheat\s*grass|wheatgrass/i.test(nameRaw)) return 'Wheatgrass';
+  if (/pop\s*corn/i.test(nameRaw)) return 'Popcorn';
+  if (/cantaloupe/i.test(nameRaw)) return 'Cantaloupe';
+  if (/strawberry/i.test(nameRaw)) return 'Strawberry';
+
+  // Fallback: return the original (so nothing is lost)
+  return nameRaw;
+}
+
+/** ===== Sheet helpers ===== **/
+
+function ensureHeader(sheet, header) {
+  const existing = sheet.getRange(1, 1, 1, header.length).getValues()[0];
+  const same = existing.length === header.length &&
+    existing.every((h, i) => (h || '').toString().trim() === header[i]);
+  if (!same) sheet.getRange(1, 1, 1, header.length).setValues([header]);
+}
+
+function clearBodyExceptColumnE(sheet, totalCols) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return;
+  // Clear A-D
+  sheet.getRange(2, 1, lastRow - 1, 4).clearContent();
+  // Skip E, clear F..end
+  if (totalCols > 5) {
+    const colsAfterE = totalCols - 5;
+    sheet.getRange(2, 6, lastRow - 1, colsAfterE).clearContent();
+  }
+}
+
+function addDays(d, n) { const x = new Date(d.getTime()); x.setDate(x.getDate() + n); return x; }
+function startOfDay(d) { const x = new Date(d.getTime()); x.setHours(0,0,0,0); return x; }
+function normalizeDate(v) { return new Date(v); }
+
+function sanitizeDescription(descHtml) {
+  if (!descHtml) return '';
+  let s = String(descHtml);
+
+  // Normalize common HTML structures to line-based text
+  s = s
+    // bullet items to lines
+    .replace(/<\/li>\s*/gi, '\n')
+    .replace(/<li[^>]*>/gi, '• ')
+    // line breaks & paragraphs to newline
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>\s*/gi, '\n')
+    .replace(/<p[^>]*>/gi, '')
+    // headings/strong/emphasis just remove tags (keep text)
+    .replace(/<\/?(strong|b|em|i|u|span|div|h[1-6])[^>]*>/gi, '')
+    // remove remaining tags
+    .replace(/<\/?[^>]+>/g, '')
+    // collapse repeated whitespace
+    .replace(/\u00A0/g, ' ')        // &nbsp;
+    .replace(/\s+\n/g, '\n')
+    .replace(/\n\s+/g, '\n')
+    .trim();
+
+  // Decode a few common entities
+  s = htmlDecode(s);
+  return s;
+}
+
+function htmlDecode(text) {
+  if (!text) return '';
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&middot;/g, '•');
+}
